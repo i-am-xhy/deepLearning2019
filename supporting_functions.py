@@ -21,19 +21,50 @@ def uniform_random_n(start, stop, n):
     # returns n uniform randomly picked values between [start,stop>
     return numpy.random.uniform(start, stop, n)
 
-def datasets_generator(numpy_x, numpy_y, train_ratio, dataloader_params, **kwargs):
-    # numpy data should be rows of x, y
-    # returns a training and test torch dataset, according to trainig_ratio
 
-    # if train_ratio+validate_ratio>=1:
-    #     print("datasets generator got invalid configuration, exiting")
-    #     exit()
+def get_scaling_factor(DataLoader, feature_index=0):
+    # returns the factor by which the iterator needs to be scaled to achieve zero weighted scaling
+    sum = 0
+    count = 0
+    for i, data in enumerate(DataLoader):
+        features, label = data
+        sum += label
+        count += 1
 
-    numpy_data = numpy.array(list(zip(numpy_x, numpy_y)))
+    return sum/count
 
+
+def scale(DataLoader, scaling_factor, feature_index=0):
+    ids = []
+    labels = []
+    for i, data in enumerate(DataLoader):
+        features, label = data
+        label = label - scaling_factor
+
+        ids.append(features)
+        labels.append(label)
+
+    return PytorchDataset(ids, labels)
+
+def descale(DataLoader, scaling_factor, feature_index=0):
+    ids = []
+    labels = []
+    for i, data in enumerate(DataLoader):
+        features, label = data
+        features[feature_index] = features[feature_index] + scaling_factor
+        label = label + scaling_factor
+
+        ids.append(features)
+        labels.append(label)
+
+    return PytorchDataset(ids, labels)
+
+def numpy_data_to_trainloaders(numpy_data, train_ratio, dataloader_params):
     total_objects = len(numpy_data)
     train_objects = floor(train_ratio * total_objects)
     # validate_objects = floor(validate_ratio * total_objects)
+
+    numpy.random.shuffle(numpy_data)
 
     numpy_train = numpy_data[:train_objects]
     # numpy_validate = numpy_data[train_objects:(train_objects+validate_objects)]
@@ -54,25 +85,40 @@ def datasets_generator(numpy_x, numpy_y, train_ratio, dataloader_params, **kwarg
 
     return trainloader, testloader
 
-def realset_generator(csv_path, dataloader_params):
+def datasets_generator(numpy_x, numpy_y, train_ratio, dataloader_params, **kwargs):
+    # numpy data should be rows of x, y
+    # returns a training and test torch dataset, according to trainig_ratio
+
+    # if train_ratio+validate_ratio>=1:
+    #     print("datasets generator got invalid configuration, exiting")
+    #     exit()
+
+    numpy_data = numpy.array(list(zip(numpy_x, numpy_y)))
+
+    return numpy_data_to_trainloaders(numpy_data, train_ratio, dataloader_params)
+
+
+def realset_generator(csv_path, train_ratio, dataloader_params, lower_range, upper_range):
     with open(csv_path) as csv_file:
         csv_reader = csv.DictReader(csv_file, delimiter = " ")
         real_x = []
         real_y = []
         # todo figure out what MRCI is and correct it
         for line in csv_reader:
-            real_x.append(float(line['R [A]']))
-            real_y.append(float(line['MRCI1 [eV]']))
-        print(real_x)
-        realtestset = PytorchDataset(real_x, real_y)
-        realTestLoader = torch.utils.data.DataLoader(realtestset, **dataloader_params)
+            distance = float(line['R [A]'])
+            if distance >= lower_range and distance <= upper_range:
+                real_x.append(distance)
+                real_y.append(float(line['MRCI1 [eV]']))
+        # print(real_x)
 
-        # todo should probably return realtrainset aswell
-        return realTestLoader
+        numpy_data = numpy.array(list(zip(real_x, real_y)))
+
+        return numpy_data_to_trainloaders(numpy_data, train_ratio, dataloader_params)
+
 
 
 def numpy_to_x_y(numpy):
-    print(numpy)
+    # print(numpy)
     return numpy[:,0], numpy[:,1]
 
 def train_scenario(net, criterion, trainloader, learning_rate=0.01, momentum=0.9):
@@ -85,7 +131,8 @@ def train_scenario(net, criterion, trainloader, learning_rate=0.01, momentum=0.9
     #     net = net.cuda()
 
 
-    optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=momentum)
+    # optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=momentum)
+    optimizer = optim.Rprop(net.parameters(), lr=learning_rate)
 
     for i, data in enumerate(trainloader):
         # get the inputs
@@ -104,12 +151,17 @@ def train_scenario(net, criterion, trainloader, learning_rate=0.01, momentum=0.9
 
 def predict_scenario(net, criterion, testloader):
     total_loss = 0
+    all_inputs = []
     for i, data in enumerate(testloader):
         inputs, labels = data
 
         predictions = net(inputs)
-        print("predictions: {} labels: {}".format(predictions, labels))
+        all_inputs.extend(inputs)
+        # print("predictions: {} labels: {}".format(predictions, labels))
         loss = criterion(predictions, labels)
-        total_loss+=loss
-    print(i)
-    return total_loss/(i+1)
+        total_loss += loss
+    # print(i)
+    print("all inputs")
+    print(all_inputs)
+    all_predictions = net(torch.tensor(all_inputs))
+    return total_loss/(i+1), i+1, all_predictions
