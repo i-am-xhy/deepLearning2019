@@ -5,6 +5,9 @@ import torch.nn as nn
 import numpy
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+import torch.optim as optim
+
+from sklearn.neural_network import MLPRegressor
 
 # correct for scale difference neural network and expected range
 
@@ -12,15 +15,15 @@ if __name__ == '__main__':
     # freeze_support()
     accuracies = []
     runs = 1
-    lower_boundary=0.85
-    upper_boundary=1.5
-    learning_rate=0.5
-    x_values = sf.uniform_random_n(lower_boundary, upper_boundary, 300)
-    file_path = 'data/pig.csv'
+    lower_boundary = 0.85
+    upper_boundary = 3
+    learning_rate = 0.01
+    x_values = sf.uniform_random_n(lower_boundary, upper_boundary, 30000)
+    file_path = 'data/sigmau-.csv'
     true_data_epochs = 100
     dataloader_params = {
         'batch_size': 1,
-        'shuffle': True,
+        'shuffle': False,
         'num_workers': 1
     }
 
@@ -32,59 +35,71 @@ if __name__ == '__main__':
             super(Net, self).__init__()
 
             self.fc1 = nn.Linear(1, 10)
-            self.fc2 = nn.Linear(10, 10)
+            # self.fc2 = nn.Linear(100, 100)
             self.fc3 = nn.Linear(10, 1)
 
 
         def forward(self, x):
             x = x.view(-1, 1)
-            x = F.logsigmoid(self.fc1(x))
-            x = F.logsigmoid(self.fc2(x))
-            x = self.fc3(x)
+            x = F.relu(self.fc1(x))
+            # x = self.fc2(x)
+            x = F.relu(self.fc3(x))
             return x
 
     for i in range(runs):
-        trainloader, testloader = sf.datasets_generator(x_values, sf.get_generalized_approximation(x_values), 0.8, dataloader_params)
+        # trainloader, testloader = sf.datasets_generator(x_values, sf.get_generalized_approximation(x_values), 0.8, dataloader_params)
+        # trainloader = sf.rescale(trainloader)
+        # testloader = sf.rescale(testloader)
 
-
-        # todo consider initializing to the mean of trainloader. and reinitializing for realtest
-        criterion = nn.MSELoss()
-        # pretraining on artificial data
-        net = sf.train_scenario(Net(), criterion, trainloader, learning_rate=learning_rate)
-
-        realTrainLoader, realTestLoader = sf.realset_generator(file_path, 0.2, dataloader_params, lower_boundary, upper_boundary)
+        realTrainLoader, realTestLoader = sf.realset_generator(file_path, 0.5, dataloader_params, lower_boundary, upper_boundary)
 
         scale_factor = sf.get_scaling_factor(realTrainLoader)
         scaled_real_trainLoader = sf.scale(realTrainLoader, scale_factor)
         scaled_real_testloader = sf.scale(realTestLoader, scale_factor)
-
+        # scaled_real_trainLoader = sf.rescale(scaled_real_trainLoader)
+        # scaled_real_testloader = sf.rescale(scaled_real_testloader)
         # criterion = nn.MSELoss()
-        # for i in range(true_data_epochs):
-        #
-        #     sf.train_scenario(Net(), criterion, scaled_real_trainLoader)
+        # net = Net()
+        # optimizer = optim.Adam(net.parameters(), lr=learning_rate)
+        # net = sf.train(net, criterion, trainloader, scaled_real_testloader, optimizer)
 
         print("scaled factor: {}".format(scale_factor))
         print(scaled_real_testloader.labels)
         # todo i might be doubly dividing the error  by count, ensure  this isn't the case
         # prediction_criterion = nn.MSELoss()
-        loss, count, predictions = sf.predict_scenario(net, criterion, scaled_real_testloader)
+        # loss, count, predictions = sf.predict_scenario(net, criterion, scaled_real_testloader)
 
-        print("total loss is: {} and there are {} objects".format(loss, count))
-        print("average loss is: {}".format(loss / count))
-        accuracies.append(float(loss / count))
+        # print("total loss is: {} and there are {} objects".format(loss, count))
+        # print("average loss is: {}".format(loss / count))
+        # accuracies.append(float(loss / count))
+        # print(sf.get_generalized_approximation(x_values).reshape)
+        clf = MLPRegressor(solver='adam', alpha=0.01, hidden_layer_sizes = (100), random_state = 1, max_iter=20000)
 
+        real_x_train_values = torch.tensor(scaled_real_trainLoader.list_IDs).reshape(-1,1)
+        real_y_train_values = torch.tensor(scaled_real_trainLoader.labels).reshape(-1,1)
+
+        print(real_y_train_values)
+
+        clf.fit(x_values.reshape(-1,1), sf.get_generalized_approximation(x_values).reshape(-1,1))
+        clf.fit(real_x_train_values, real_y_train_values)
+
+        test_x_values = torch.tensor(scaled_real_testloader.list_IDs).detach().numpy()
+        predictions = clf.predict(test_x_values.reshape(-1,1))
+        print(predictions)
         # print(predictions)
-        predictions = predictions.detach().numpy()
-        x_values = torch.tensor(scaled_real_testloader.list_IDs).detach().numpy()
+        # predictions = predictions.detach().numpy()
+
+        real_x_values = torch.tensor(scaled_real_testloader.list_IDs).detach().numpy()
         true_y_values = torch.tensor(scaled_real_testloader.labels).detach().numpy()
         # print(x_values)
 
-        indexes = numpy.argsort(x_values)
+        indexes = numpy.argsort(real_x_values)
         sorted_x_values = []
         sorted_predictions = []
         sorted_true_y_values = []
+        print(x_values)
         for index in indexes:
-            sorted_x_values.append(x_values[index])
+            sorted_x_values.append(real_x_values[index])
             sorted_predictions.append(predictions[index])
             sorted_true_y_values.append(true_y_values[index])
 
@@ -101,7 +116,7 @@ if __name__ == '__main__':
         plt.legend()
         plt.show()
 
-    print("average loss over {} runs is {}".format(runs, numpy.mean(accuracies)))
+    # print("average loss over {} runs is {}".format(runs, numpy.mean(accuracies)))
 
 
 

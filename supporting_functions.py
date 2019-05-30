@@ -1,9 +1,10 @@
 import numpy
 import torch
+import sys
 from math import floor
 import torch.nn as nn
 import csv
-import torch.optim as optim
+
 from PytorchDataset import PytorchDataset
 
 def get_generalized_approximation(x_values):
@@ -24,14 +25,15 @@ def uniform_random_n(start, stop, n):
 
 def get_scaling_factor(DataLoader, feature_index=0):
     # returns the factor by which the iterator needs to be scaled to achieve zero weighted scaling
-    sum = 0
-    count = 0
-    for i, data in enumerate(DataLoader):
-        features, label = data
-        sum += label
-        count += 1
-
-    return sum/count
+    # sum = 0
+    # count = 0
+    # for i, data in enumerate(DataLoader):
+    #     features, label = data
+    #     sum += label
+    #     count += 1
+    #
+    # return sum/count
+    return -2952.11835930275
 
 
 def scale(DataLoader, scaling_factor, feature_index=0):
@@ -51,13 +53,34 @@ def descale(DataLoader, scaling_factor, feature_index=0):
     labels = []
     for i, data in enumerate(DataLoader):
         features, label = data
-        features[feature_index] = features[feature_index] + scaling_factor
         label = label + scaling_factor
 
         ids.append(features)
         labels.append(label)
 
     return PytorchDataset(ids, labels)
+
+def rescale(DataLoader):
+    # scales data to be between -1 and 1
+    min = sys.maxsize
+    max = -sys.maxsize
+    for i, item in enumerate(DataLoader):
+        value, label = item
+        if label<min:
+            min = label
+        if label>max:
+            max = label
+
+    ids = []
+    labels = []
+    for i, item in enumerate(DataLoader):
+        value, label = item
+        newlabel = ((label-min)/(max-min)-0.5)*2
+        labels.append(newlabel)
+        ids.append(value)
+
+    return PytorchDataset(ids, labels)
+
 
 def numpy_data_to_trainloaders(numpy_data, train_ratio, dataloader_params):
     total_objects = len(numpy_data)
@@ -121,7 +144,7 @@ def numpy_to_x_y(numpy):
     # print(numpy)
     return numpy[:,0], numpy[:,1]
 
-def train_scenario(net, criterion, trainloader, learning_rate=0.01, momentum=0.9):
+def train_scenario(net, criterion, trainloader, optimizer):
 
 
     # use_gpu = torch.cuda.is_available()
@@ -132,7 +155,7 @@ def train_scenario(net, criterion, trainloader, learning_rate=0.01, momentum=0.9
 
 
     # optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=momentum)
-    optimizer = optim.Rprop(net.parameters(), lr=learning_rate)
+
 
     for i, data in enumerate(trainloader):
         # get the inputs
@@ -149,19 +172,34 @@ def train_scenario(net, criterion, trainloader, learning_rate=0.01, momentum=0.9
 
     return net
 
+def train(net, criterion, trainloader, real_trainloader, optimizer):
+    trainloader = rescale(trainloader)
+
+
+    # todo consider initializing to the mean of trainloader. and reinitializing for realtest
+    # pretraining on artificial data
+    net = train_scenario(net, criterion, trainloader, optimizer=optimizer)
+
+    # criterion = nn.MSELoss()
+    # for i in range(true_data_epochs):
+    #
+    #     sf.train_scenario(Net(), criterion, scaled_real_trainLoader)
+
+    return net
+
 def predict_scenario(net, criterion, testloader):
     total_loss = 0
     all_inputs = []
     for i, data in enumerate(testloader):
         inputs, labels = data
-
+        # print("inputs {}: ".format(inputs))
         predictions = net(inputs)
         all_inputs.extend(inputs)
         # print("predictions: {} labels: {}".format(predictions, labels))
         loss = criterion(predictions, labels)
         total_loss += loss
     # print(i)
-    print("all inputs")
-    print(all_inputs)
+    # print("all inputs")
+    # print(all_inputs)
     all_predictions = net(torch.tensor(all_inputs))
-    return total_loss/(i+1), i+1, all_predictions
+    return total_loss, i+1, all_predictions
